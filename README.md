@@ -8,6 +8,7 @@ Physics reference: [PHYSICS_SPEC.md](PHYSICS_SPEC.md). Every formula in the code
 
 ## Setup
 ```bash
+conda activate yoyo            # project env (Python 3.11)
 pip install -r requirements.txt
 python -m pytest               # 51 tests (§9), ~25 s
 ```
@@ -24,6 +25,8 @@ python -m scripts.funnel_sweep                     # capture map: swing angle x 
 python -m viz.plot_funnel                          # funnel cross-sections -> runs/funnel_profile.png
 python -m viz.animate runs/<run_dir> --speed 0.25  # re-render a saved run (or --show)
 ```
+Browse every run in one page: `python -m scripts.gallery --open` writes `runs/index.html`. Each run gets a card with its outcome, events, the parameters that differ from `config/params.yaml`, `summary.png` and `anim.gif`.
+
 Each demo writes `runs/<time>_<scenario>/` with `log.npz` (one row per 0.2 ms physics step), `events.csv/json`, `params.json`, `summary.png` and `anim.gif`.
 
 ## Layout
@@ -54,6 +57,7 @@ viz/
 scripts/
   run_demo.py          demo scenarios
   funnel_sweep.py      capture-outcome table for funnel design
+  gallery.py           runs/index.html overview of all runs
 tests/                 test_yoyo (1-6), test_funnel (7-8), test_arm (9-11), test_baseline (12), test_env
 ```
 
