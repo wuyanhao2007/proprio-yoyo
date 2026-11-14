@@ -1,0 +1,127 @@
+# proprio-yoyo parameter file — the single source of numeric values.
+# Section numbers (§) refer to PHYSICS_SPEC.md. Every key here maps 1:1 to a
+# field of sim.params.Params; unknown keys are an error.
+# "TODO(sysid)" = placeholder until measured on hardware (roadmap stage 4).
+
+yoyo:                     # §1 yo-yo and string
+  m: 0.050                # kg, scale
+  R: 0.028                # m, outer radius, calipers
+  I_coef: 0.6             # I = I_coef * m * R^2  (≈2.35e-5 kg m^2). TODO(sysid) drop test
+  r0: 0.006               # m, effective axle radius with string fully out. TODO(sysid)
+  L: 0.80                 # m, string length, tape measure
+  d_s: 1.2e-3             # m, string diameter, calipers
+  r_full: 0.015           # m, radius with string fully wound (§3.4, used for w_eff)
+  c_loss: 1.0             # bottom-loss correction on zeta. TODO(sysid)
+  c_l: 0.0                # 1/s, damping along string. TODO(sysid)
+  e_taut: 0.1             # string snap restitution, estimate
+  v_snap_min: 0.05        # m/s, snaps slower than this are fully inelastic (§3.5 amendment)
+
+arm:                      # §1 arm
+  l1: 0.15                # m, joint-1 axis -> wrist axis (design variable 0.15-0.18)
+  l2: 0.015               # m, wrist axis -> string exit H (design variable 0.01-0.03)
+  m1: 0.04                # kg, link 1 (carbon tube + end fittings)
+  m2: 0.005               # kg, adapter beyond the wrist axis
+  mc: 0.02                # kg, funnel
+  lc_offset: 0.02         # m, funnel COM at lc = l2 + lc_offset from wrist axis (CAD)
+  Ic_radius: 0.02         # m, funnel inertia about its COM: Ic = mc * Ic_radius^2
+  m_e: 0.08               # kg, elbow point mass (GM3506 + U-fork + 608)
+  q1_min: -3.14159        # rad, joint-1 hard limits (-180 deg)
+  q1_max: 3.14159         # rad (+180 deg)
+
+drive:                    # §1/§6 transmission, motors, drivers
+  N1: 6.0                 # joint-1 belt ratio (20T -> 120T)
+  eta1: 0.9               # joint-1 belt efficiency
+  Jr1: 4.0e-5             # kg m^2, GM4108 rotor. TODO datasheet
+  Jr2: 2.0e-5             # kg m^2, GM3506 rotor. TODO datasheet
+  Kt1: 0.09               # N m/A, placeholder. TODO(sysid) weight calibration
+  Kt2: 0.05               # N m/A, placeholder. TODO(sysid) weight calibration
+  R1: 11.1                # ohm, phase resistance (datasheet)
+  R2: 5.57                # ohm
+  tau_max1: 0.15          # N m, continuous motor torque (datasheet)
+  tau_max2: 0.08          # N m
+  i_peak_ratio: 1.0       # current limit = i_peak_ratio * tau_max/Kt (2-3x allowed short-term)
+  V_bus: 24.0             # V
+  V_lim2: 12.0            # V, GM3506 rated 2-3S
+  use_back_emf: false     # §6 v4: back-EMF current limit
+  b1: 2.0e-3              # N m s/rad, joint-1 viscous friction (joint side). TODO(sysid)
+  b2: 1.0e-4              # N m s/rad, wrist viscous. TODO(sysid)
+  tc1: 5.0e-3             # N m, joint-1 Coulomb. TODO(sysid)
+  tc2: 1.0e-3             # N m, wrist Coulomb. TODO(sysid)
+  tau_i: 0.8e-3           # s, current-loop time constant
+  cogging_amp: 0.0        # fraction of tau_max, cogging residual (domain randomization only)
+
+firmware:                 # §6 position-mode PD on the driver (initial guesses, tune)
+  Kp1: 20.0               # N m/rad at the joint
+  Kd1: 0.5                # N m s/rad at the joint
+  Kp2: 1.0                # N m/rad
+  Kd2: 0.015              # N m s/rad
+  cmd_delay: 5.0e-3       # s, host -> driver command latency (roadmap stage 1)
+
+funnel:                   # §1/§4 funnel. In-plane = the arm plane (yo-yo diameter direction)
+  capture_model: geometry # "geometry" (wall contact, §4.3), "gate" (§4.2 thresholds) or "none"
+  d_cup: 0.045            # m, total depth from H to the mouth plane
+  d_apex: 0.003           # m, gap from string hole to yo-yo top (swivel)
+  seat_width: 0.059       # m, in-plane seat width (2R + loose clearance)
+  seat_thickness: 0.036   # m, out-of-plane seat width (not used by the 2-D sim)
+  seat_depth: 0.028       # m, depth of the straight seat section
+  mouth_width: 0.080      # m, in-plane mouth width
+  mouth_thickness: 0.055  # m, out-of-plane mouth width (not used by the 2-D sim)
+  flare_exponent: 2.0     # flare shape: 1 = straight cone, 2 = trumpet (tangent to the seat wall)
+  wall_thickness: 0.0018  # m, PETG wall (drawing only)
+  alpha_cap: 0.1745       # rad (10 deg), gate model: max misalignment at the mouth
+  v_cap_max: 0.5          # m/s, max speed into the seat to stow
+  e_cup: 0.3              # seat restitution
+  F_mag0: 1.0             # N, magnet pull when seated
+  d_mag: 0.003            # m, magnet decay distance
+  k_wall: 5.0e4           # N/m, penalty stiffness of the wall (geometry model)
+  e_wall: 0.3             # wall restitution (sets penalty damping)
+  mu_wall: 0.3            # rim-wall friction (PETG ~0.3, TPU ~0.8). TODO measure
+
+sensors:                  # §7
+  enc_counts: 16384       # AS5048A, 14 bit
+  enc_delay: 1.0e-3       # s
+  vel_cutoff: 100.0       # Hz, first-order low-pass on differentiated angle
+  i_noise: 0.030          # A, Gaussian current noise std
+  i_bias_max: 0.020       # A, per-episode bias drawn from U(-max, max)
+  i_delay: 0.5e-3         # s
+
+sim:                      # §2/§8
+  g: 9.81
+  dt: 2.0e-4              # s, physics step (5 kHz)
+  substeps: 25            # physics steps per env step (200 Hz policy)
+  planar: true            # v2: string swing angle theta; false = 1-D (v0)
+  variable_radius: false  # v4: winding radius r(l) (§3.4); false = r = r0
+  stand_height: 1.25      # m, joint-1 axis above the floor (drawing only)
+
+# Domain randomization (§1). rel: +-fraction of the nominal value; range: absolute [lo, hi].
+randomization:
+  m: {rel: 0.05}
+  I_coef: {rel: 0.20}
+  r0: {range: [0.004, 0.008]}
+  L: {range: [0.79, 0.81]}
+  c_loss: {range: [0.85, 1.0]}
+  c_l: {range: [0.0, 0.5]}
+  e_taut: {range: [0.0, 0.3]}
+  m1: {rel: 0.10}
+  m2: {rel: 0.20}
+  mc: {rel: 0.10}
+  m_e: {rel: 0.10}
+  eta1: {range: [0.8, 0.95]}
+  Jr1: {rel: 0.20}
+  Jr2: {rel: 0.20}
+  Kt1: {rel: 0.10}
+  Kt2: {rel: 0.10}
+  R1: {rel: 0.05}
+  R2: {rel: 0.05}
+  b1: {rel: 0.50}
+  b2: {rel: 0.50}
+  tc1: {rel: 0.50}
+  tc2: {rel: 0.50}
+  tau_i: {range: [0.5e-3, 1.5e-3]}
+  cogging_amp: {range: [0.01, 0.03]}
+  cmd_delay: {range: [0.0, 15.0e-3]}
+  alpha_cap: {range: [0.0873, 0.2618]}
+  v_cap_max: {range: [0.3, 0.8]}
+  e_cup: {range: [0.1, 0.5]}
+  F_mag0: {range: [0.6, 1.5]}
+  mu_wall: {range: [0.1, 0.6]}
