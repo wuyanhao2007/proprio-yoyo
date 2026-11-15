@@ -21,6 +21,9 @@ python -m scripts.run_demo full_flow --n-bounces 0 --duration 30   # keep bounci
 python -m scripts.run_demo throw_bounce            # stowed -> throw -> passive bounces
 python -m scripts.run_demo funnel_catch            # climbing yo-yo meets the funnel
 python -m scripts.run_demo funnel_catch --theta0 9 --v0 0.9 --set mu_wall=0.1
+python -m scripts.run_demo flip_stow               # flip hand: yo-yo in the seat, turn 180 deg
+python -m scripts.run_demo flip_stow --direction wrong   # turning the other way drops it
+python -m scripts.run_demo flip_catch --theta0 0   # flip hand: climb into the cup, then flip
 python -m scripts.funnel_sweep                     # capture map: swing angle x climb speed
 python -m viz.plot_funnel                          # funnel cross-sections -> runs/funnel_profile.png
 python -m viz.animate runs/<run_dir> --speed 0.25  # re-render a saved run (or --show)
@@ -32,6 +35,8 @@ Each demo writes `runs/<time>_<scenario>/` with `log.npz` (one row per 0.2 ms ph
 ## Layout
 ```
 config/params.yaml     every numeric parameter + randomization ranges (TODO(sysid) = placeholder)
+config/hand_magnet.yaml  hand overlay: magnet catch (= the defaults)
+config/hand_flip.yaml    hand overlay: flip catch (§4.4) + flip-controller settings
 PHYSICS_SPEC.md        physics spec (English) + implementation amendments (§11)
 sim/
   params.py            Params dataclass, derived quantities (kappa, zeta, ...), sample_params()
@@ -39,7 +44,10 @@ sim/
   env.py               YoyoEnv.reset / step  (obs = proprioception, priv = true state)
   log.py               per-step log fields, save_run / load_run
 yoyo/
-  modes.py             STOWED / FREE / TAUT / FAIL
+  modes.py             STOWED / FREE / TAUT / FAIL / IN_CUP
+  catch.py             dispatch on catch_mode, shared seat rebound
+  catch_magnet.py      magnet catch: stow, release (§4.1-§4.2)
+  catch_flip.py        flip catch: IN_CUP slide model with the arm (§4.4, A9)
   dynamics.py          string equations (§3.2), bottom (§3.6), snap impulse (§3.5)
   funnel.py            funnel profile, wall contact, magnet (§4)
 arm/
@@ -51,6 +59,7 @@ arm/
 control/
   trajectories.py      open-loop Throw and Hold reference generators
   baseline.py          true-state Zlajpah-style pulse baseline (throw, bounce, catch)
+  stow_flip.py         flip hand: detect the seated yo-yo, 180 deg cosine flip
 viz/
   animate.py           rig + funnel close-up + l/T/i1/i2 plots, GIF/MP4
   plot_funnel.py       funnel design figure
@@ -58,7 +67,8 @@ scripts/
   run_demo.py          demo scenarios
   funnel_sweep.py      capture-outcome table for funnel design
   gallery.py           runs/index.html overview of all runs
-tests/                 test_yoyo (1-6), test_funnel (7-8), test_arm (9-11), test_baseline (12), test_env
+tests/                 test_yoyo (1-6), test_funnel (7-8), test_arm (9-11), test_baseline (12), test_env,
+                       test_catch_flip (§4.4 F1-F4)
 ```
 
 ## Using the simulator
@@ -88,6 +98,15 @@ For unit tests or quick studies, `Simulator(p, hook=KinematicHook(...))` prescri
 - `geometry` (default): seat with clearance plus a trumpet flare (`flare_exponent`, 1 = cone). The yo-yo rim gets penalty contact with friction against the wall (§4.3).
 - `gate`: the spec's threshold model (§4.2), with `alpha_cap`, `v_cap_max` and `e_cup`.
 - `none`: no funnel.
+
+## Hands: magnet or flip
+`catch_mode` picks how the caught yo-yo is held. Load a hand with `Params.load(hand="magnet" | "flip")`;
+the overlay files in `config/` change only the parameters in the §4.4 table.
+- `magnet` (default): a magnet in the seat holds the yo-yo; the throw pulls it out (§4.1–§4.2).
+- `flip`: the yo-yo sits on the wrist axis (`l2 < 0`), no magnet. After the catch, `control/stow_flip.py`
+  turns the hand 180° so the mouth faces up. In the cup the yo-yo slides along the funnel axis (`IN_CUP`).
+  The flip direction must follow the winding sign σ. The other direction unwinds the string and the
+  yo-yo falls out (amendment A9).
 
 ## Baseline and margins (stage 1 step 9)
 `control/baseline.py` reads the true yo-yo state, which is the "cheating" stage-1 baseline. In the hook frame,

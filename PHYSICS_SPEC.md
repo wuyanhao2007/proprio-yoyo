@@ -205,7 +205,8 @@ The first one is the core of the stage-4 proprioceptive observer: the time betwe
 
 ## 4. Funnel: throw and catch
 The funnel is fixed to the wrist rotor; its apex is H. Opening direction
-`a = (cos φ2, sin φ2)` (from the wrist axis towards H). Bounce posture: link 2 down,
+`a = (cos φ2, sin φ2)` (from H towards the mouth; H = wrist axis + l2·a, so for the
+magnet hand a also points from the wrist axis towards H, for the flip hand of §4.4, l2 < 0, H lies behind the axis). Bounce posture: link 2 down,
 φ2 = −90°, `a = (0, −1)`. Funnel frame: axial z along a from H (0 at H, d_cup at the
 mouth plane), lateral x along `n = (−sin φ2, cos φ2)`.
 
@@ -267,6 +268,79 @@ FAIL "hit_rim": disc top above the mouth plane (`z − R < d_cup`) while the cen
 outside the inner wall (`|x| > w(min(z, d_cup))`).
 The gate thresholds `alpha_cap` are not used in this model; `v_cap_max`, `e_cup` and the
 magnet are. If the success rate still disagrees with hand tests, move to MuJoCo convex-hull contact.
+
+### 4.4 Alternative: flip catch (`catch_mode = "flip"`) **[A9]**
+(Numbered §4.3 in the Claude Doc.) Developed in parallel with the magnet hand and selected by
+configuration: `Params.load(hand="flip")` reads `config/hand_flip.yaml` over `params.yaml`;
+`hand="magnet"` (`config/hand_magnet.yaml`) is identical to the default. §4.1–§4.3 are unchanged.
+
+**Hardware**: trunnions on both sides of the funnel (GM3506 on one side, 608 on the other). The wrist
+axis passes through the centre of the seated yo-yo; the string exit H is on the other side of the axis.
+No magnet (optionally a weak one); after the catch the hand turns 180° so the mouth faces up and gravity holds the yo-yo.
+
+| Parameter | magnet (default) | flip |
+|---|---|---|
+| `l2` | 0.015 m | `−ell_min` = −0.031 m (yo-yo centre on the wrist axis) |
+| `d_cup` | 0.045 m | 0.088 m (2–4 cm of cup beyond the seat) |
+| `seat_depth` | 0.028 m | 0.061 m = `ell_min + s_max`, so the bead model below holds for all s ≤ s_max. TODO(CAD) |
+| `s_max` | — | 0.03 m: further from the seat than this = fallen out |
+| `F_mag0` | 1.0 N | 0 (optional weak magnet 0.2 N); its randomization entry is removed |
+| `lc` | `l2 + 0.02` | 0.010 m (`lc_offset` 0.041), TODO(CAD) |
+| `Ic` | `mc·0.02²` | `mc·0.035²`, TODO(CAD) |
+| `t_flip` | — | controller setting (`controller:` block of hand_flip.yaml), 0.12 s |
+
+The §5 kinematics and dynamics are unchanged; l2 is negative (tests check gravity, Jacobian, sympy and
+energy for l2 < 0). The stowed flip yo-yo also turns with link 2, so its spin inertia `I` is added to `J2`
+(`link_constants(..., yoyo_spin=True)`); the magnet hand keeps the point-mass model.
+
+**New mode `IN_CUP`** (flip only): the seat walls keep the yo-yo on the axis a; it can only slide along it.
+`s ≥ 0` is its distance from the seat. Coordinates `z = (q1, φ2, s, θ_y)`, θ_y = absolute spin angle:
+```
+P = E(q1) + x·a(φ2),   x = l2 + ell_min + s                  (x = s for the flip hand)
+M4 z̈ = f4 + Gᵀλ,   M4 = M_arm(c_free) + m J_Pᵀ J_P + I on θ_y
+seat:    s ≥ 0                                   λ = N ≥ 0
+string:  ṡ = σ r (θ̇_y − φ̇2),  r = r_full        λ = T ≥ 0 (only while taut)
+```
+Solved as a small LCP over the active set, jointly with the arm (like §5.4). With the wrist axis fixed
+and the yo-yo off the seat this reduces to
+```
+A_out = −(Ë − g_vec)·a + φ̇2²·x − F_mag(s)/m
+taut:   s̈ = κ(r) A_out − σ (1 − κ) r φ̈2,   T = (I κ / r²)(A_out + σ r φ̈2) ≥ 0
+slack:  s̈ = A_out, spin free, slack length grows with σ r (θ̇_y − φ̇2) − ṡ (as A7)
+```
+The tangential (Euler, Coriolis) forces are carried by the walls; no wall friction in v1.
+
+**A9** — the first-written bead model was `s̈ = κ A_out`. Two corrections, both of the size of s_max:
+the cup rotation turns the string direction while the yo-yo's spin inertia holds it back
+(`(1 − κ) r π ≈ 3.2 cm` over a half turn), and the string cannot push (T ≥ 0, otherwise slack and no κ).
+Consequence: **the flip direction matters.** Turning with sign σ winds the string during the
+acceleration half and pins the yo-yo in the seat; the other sign lets it fall out (for t_flip ≥ 0.08 s).
+`control/stow_flip.py` picks sign σ. `spin_coupling: false` restores the first-written model.
+
+**Events (flip)**:
+
+| Event | Condition | Result |
+|---|---|---|
+| seat | TAUT/FREE `ℓ ≤ ell_min`, `v < v_cap_max` | → IN_CUP, `s = ṡ = 0`, string taut: the yo-yo also stops spinning relative to the cup; generalized momentum incl. `I ω_abs` is conserved (`in_cup`) |
+| seat, fast | `v ≥ v_cap_max` | rebound as §4.2 |
+| cup seat / cup snap | IN_CUP, s reaches 0 / slack length closes | impulse: §4.2 rule (inelastic below v_cap_max, else e_cup) / §3.5 rule (e_taut above v_snap_min) |
+| fallen out | IN_CUP `s > s_max` | → TAUT (FREE if slack), `ℓ = ell_min + s`, `inside = true`; event `release` after a throw, `drop` after a catch |
+| stowed | IN_CUP, mouth up (`a·(0,1) > cos stow_tilt_max`, 30°), `s = 0`, for `t_stow_hold` = 0.5 s | → STOWED (rigid merge), caught if it had been thrown |
+| throw | STOWED, `F_in > F_mag0` (§4.1) | → IN_CUP (`unseat`), then falls out by `s > s_max` |
+
+With `F_mag0 = 0` the throw is "turn the mouth down": as soon as it tilts below horizontal `F_in > 0` and the yo-yo slides out.
+
+**Findings from the implementation** (estimates with the TODO(sysid) values):
+- The flip with sign σ keeps `s < 0.1 mm` for t_flip 0.06–0.15 s; detection must be fast: mouth down the
+  yo-yo leaves the seat at κg and reaches s_max after 0.137 s (≈ 0.7 cm after 50 ms).
+- Wrist torque: 180° in t_flip needs `J2_seated·2π²/t_flip²` ≈ 0.10 N m at 0.12 s (seated J2 = 7.2e-5 kg m²),
+  above `tau_max2` = 0.08 N m; with `use_back_emf` the 12 V limit caps it near 0.1 N m. The tests use `i_peak_ratio = 2`.
+- After the decelerating half the string is slack and the frictionless yo-yo keeps spinning at about the
+  peak cup speed, paying out slack string into the cup. Its angular momentum reaches link 2 only at the rigid
+  STOWED merge (a wrist kick that saturates i2 for ~2 ms). Seat/rim friction would stop the spin earlier. TODO(sysid).
+- At arrival the climbing yo-yo's spin stops in the seat: `I ω_abs` goes into the wrist (≈ 25 rad/s with r0 = 6 mm in TAUT).
+- The deeper cup (d_cup 0.088) with `mu_wall = 0.3` stops a yo-yo arriving with a 6° swing before the seat;
+  with `mu_wall = 0.1` it reaches the seat (the magnet hand is pulled in by the magnet).
 
 ## 5. Arm dynamics
 
@@ -381,6 +455,16 @@ state, obs, priv, reward, done, info = env.step(state, action)
 11. Arm energy (§5.2): no friction, no input, no yo-yo → conserved.
 12. Zlajpah pulse baseline: ≥ 20 bounces without decay; plus the full throw → 3 bottoms → catch sequence (`tests/test_baseline.py`).
 
+Flip catch (§4.4, `tests/test_catch_flip.py`):
+- F1. Mouth up at rest: the yo-yo stays at `s = 0` (and becomes STOWED after 0.5 s).
+- F2. Flip 180° from the seat (raised-cosine velocity, wrist axis fixed, κ = 0.32): first-written model
+  (`spin_coupling: false`) max slide 3.60 cm at t_flip = 0.12 s and 1.60 cm at 0.08 s, the regression
+  numbers of the estimate; with A9 the sign-σ flip keeps `s < 1 mm` and the opposite sign falls out.
+- F3. Mouth up → mouth down: `unseat`, the yo-yo falls out (`release`) and continues TAUT.
+- F4. `catch_mode = "magnet"`: tests 1–12 unchanged (and bit-identical logs before/after the refactor).
+- Plus: the A9 formula, seated mass matrix = stowed constants, energy conservation of the coupled IN_CUP system,
+  and §5 gravity/Jacobian/sympy/energy for l2 < 0 (`tests/test_arm.py`).
+
 ## 10. Implementation order
 | Version | Content | Done when | Status |
 |---|---|---|---|
@@ -401,8 +485,14 @@ state, obs, priv, reward, done, info = env.step(state, action)
 | A6 | §2, §4.2 | `inside` is set/cleared by `|p − H|` crossing `ell_mouth`, in TAUT and FREE | needed by A2 |
 | A7 | §3.1, §3.5 | in FREE the slack length winds with the spin, `ℓ̇_s = σ r ω` | physical (string tied to the axle); brief slack after a bottom no longer destroys the climb |
 | A8 | §4.2 | `inside` is set only when the mouth plane is crossed from outside | right after a release the yo-yo is inside and may move inwards for a moment; it was re-captured by the magnet |
+| A9 | §4.4 | IN_CUP string row couples s to the cup rotation (`−σ(1−κ) r φ̈2`) and is unilateral (slack → `s̈ = A_out`); seat and string handled as an LCP with the arm | the first-written `s̈ = κ A_out` misses an effect of ≈ 3 cm per half turn and lets the string push |
 
 ### Known open issues
 - Rope–funnel contact is ignored (only the yo-yo rim touches the wall); out-of-plane (3-D) tilt is not modelled.
-- The stowed yo-yo is a point mass (its own spin inertia about the axle is not added to link 2).
+- Magnet hand: the stowed yo-yo is a point mass (its own spin inertia about the axle is not added to link 2). The flip hand adds it.
+- Flip hand (§4.4), all TODO(sysid): r = r_full in the cup but r(ℓ) (r0 unless `variable_radius`) in TAUT, so the
+  spin rate jumps at the seat; no wall/seat friction on spin or slide; the spin and slack string left at the
+  STOWED merge are dropped (the slack would matter for the next throw).
+- The flip controller updates references at 200 Hz; with the PD's missing velocity reference the staircase
+  gives a 5 ms current sawtooth of about ±1 A during the flip.
 - Belt efficiency η is applied in both power directions.

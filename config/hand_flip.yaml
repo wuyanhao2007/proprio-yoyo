@@ -1,0 +1,32 @@
+# Hand variant: flip catch (PHYSICS_SPEC §4.4, catch_mode = "flip").
+# Overlay on config/params.yaml: Params.load(hand="flip").
+# Trunnions on both sides of the funnel (GM3506 on one side, 608 on the other);
+# the wrist axis passes through the centre of the seated yo-yo and the string exit H
+# sits on the other side of the axis. No magnet: after the catch the hand flips the
+# mouth up and gravity holds the yo-yo.
+
+catch:
+  catch_mode: flip
+  s_max: 0.03             # m, IN_CUP: further than this from the seat = fallen out
+
+arm:
+  l2: -0.031              # m, = -ell_min (R + d_apex): yo-yo centre on the wrist axis when seated
+  lc_offset: 0.041        # m, funnel COM at lc = l2 + lc_offset = 0.010 m. TODO(CAD)
+  Ic_radius: 0.035        # m, Ic = mc * 0.035^2. TODO(CAD)
+
+funnel:
+  d_cup: 0.088            # m, H -> mouth plane: seat + 2-4 cm of extra cup
+  # The IN_CUP bead model needs the yo-yo held on the funnel axis for the whole
+  # 0 <= s <= s_max range, i.e. a straight seat until ell_min + s_max = 0.061 m;
+  # the trumpet flare takes the remaining 2.7 cm. TODO(CAD) confirm with the drawing.
+  seat_depth: 0.061
+  F_mag0: 0.0             # N, no magnet (optional weak magnet: 0.2)
+
+# Not physics: flip-controller settings (control/stow_flip.py reads this section).
+controller:
+  t_flip: 0.12            # s, 180 deg flip duration (§4.4: 0.08-0.12 s)
+  direction: auto         # "auto" = wind the string (sign sigma, A9); +1 / -1 to force
+  q1_hold: true           # hold joint 1 at its current reference during the flip
+
+randomization:
+  F_mag0: null            # no magnet to randomize (null removes the entry from params.yaml)

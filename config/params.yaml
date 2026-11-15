@@ -77,6 +77,13 @@ funnel:                   # §1/§4 funnel. In-plane = the arm plane (yo-yo diam
   e_wall: 0.3             # wall restitution (sets penalty damping)
   mu_wall: 0.3            # rim-wall friction (PETG ~0.3, TPU ~0.8). TODO measure
 
+catch:                    # §4.4 catch mode; config/hand_magnet.yaml / hand_flip.yaml override these
+  catch_mode: magnet      # "magnet" (§4.1-§4.2, default) or "flip" (§4.4, IN_CUP + flip the hand)
+  s_max: 0.03             # m, flip: IN_CUP slide-out distance at which the yo-yo has left the seat
+  stow_tilt_max: 0.5236   # rad (30 deg), flip: max tilt of the mouth from straight up to count as stowed
+  t_stow_hold: 0.5        # s, flip: seated + mouth up for this long -> STOWED
+  spin_coupling: true     # flip: string winds with the cup rotation (A9); false = §4.4 bead model as first written
+
 sensors:                  # §7
   enc_counts: 16384       # AS5048A, 14 bit
   enc_delay: 1.0e-3       # s

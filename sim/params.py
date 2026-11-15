@@ -4,6 +4,11 @@ All numeric values live in ``config/params.yaml``; this module only defines the
 schema. Derived quantities are functions/properties, never stored constants.
 Placeholders that still need hardware identification are marked TODO(sysid)
 in the YAML file.
+
+Hand variants (§4.4) are overlays on params.yaml: ``Params.load(hand="flip")``
+reads ``config/hand_flip.yaml`` on top of the defaults. An overlay may also carry
+a ``randomization`` block (entries replace / ``null`` removes) and a
+``controller`` block (non-physics settings, see ``load_controller``).
 """
 from __future__ import annotations
 
@@ -18,6 +23,14 @@ import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_YAML = REPO_ROOT / "config" / "params.yaml"
+CATCH_MODES = ("magnet", "flip")
+
+
+def hand_path(hand: str | Path) -> Path:
+    """``"magnet"`` / ``"flip"`` -> config/hand_<name>.yaml; anything else is a path."""
+    if isinstance(hand, str) and hand in CATCH_MODES:
+        return REPO_ROOT / "config" / f"hand_{hand}.yaml"
+    return Path(hand)
 
 
 @dataclass(frozen=True)
@@ -91,6 +104,12 @@ class Params:
     k_wall: float
     e_wall: float
     mu_wall: float
+    # --- catch mode (§4.4) ---
+    catch_mode: str
+    s_max: float
+    stow_tilt_max: float
+    t_stow_hold: float
+    spin_coupling: bool
     # --- sensors (§7) ---
     enc_counts: int
     enc_delay: float
@@ -108,11 +127,22 @@ class Params:
 
     # ------------------------------------------------------------------ loading
     @classmethod
-    def load(cls, path: str | Path | None = None, **overrides: Any) -> "Params":
-        """Load from YAML (default ``config/params.yaml``) and apply overrides."""
+    def load(cls, path: str | Path | None = None, hand: str | Path | None = None,
+             **overrides: Any) -> "Params":
+        """Load from YAML (default ``config/params.yaml``), then the hand overlay
+        (``"magnet"``, ``"flip"`` or a path), then keyword overrides."""
         values, _ = _read_yaml(path)
+        if hand is not None:
+            hv, _ = _read_yaml(hand_path(hand))
+            unknown = set(hv) - set(values)
+            if unknown:
+                raise ValueError(f"unknown parameters in {hand_path(hand)}: {sorted(unknown)}")
+            values.update(hv)
         values.update(overrides)
-        return cls(**_coerce(cls, values))
+        out = cls(**_coerce(cls, values))
+        if out.catch_mode not in CATCH_MODES:
+            raise ValueError(f"catch_mode must be one of {CATCH_MODES}, got {out.catch_mode!r}")
+        return out
 
     def replace(self, **changes: Any) -> "Params":
         return dataclasses.replace(self, **changes)
@@ -189,6 +219,7 @@ def _read_yaml(path: str | Path | None) -> tuple[dict[str, Any], dict[str, Any]]
     with open(path) as f:
         raw = yaml.safe_load(f) or {}
     rand = raw.pop("randomization", {}) or {}
+    raw.pop("controller", None)
     values: dict[str, Any] = {}
     for section, entries in raw.items():
         if not isinstance(entries, Mapping):
@@ -222,8 +253,25 @@ def _coerce(cls: type, values: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
-def load_randomization(path: str | Path | None = None) -> dict[str, Any]:
-    return _read_yaml(path)[1]
+def load_randomization(path: str | Path | None = None,
+                       hand: str | Path | None = None) -> dict[str, Any]:
+    """Randomization ranges of params.yaml, updated by the hand overlay (if any):
+    an overlay entry replaces the default one, ``null`` removes it."""
+    rand = dict(_read_yaml(path)[1])
+    if hand is not None and hand_path(hand).exists():
+        for k, v in _read_yaml(hand_path(hand))[1].items():
+            if v is None:
+                rand.pop(k, None)
+            else:
+                rand[k] = v
+    return rand
+
+
+def load_controller(hand: str | Path) -> dict[str, Any]:
+    """The non-physics ``controller`` block of a hand overlay ({} if absent)."""
+    with open(hand_path(hand)) as f:
+        raw = yaml.safe_load(f) or {}
+    return dict(raw.get("controller") or {})
 
 
 def sample_params(
@@ -234,7 +282,7 @@ def sample_params(
 ) -> Params:
     """Draw one randomized parameter set (uniform). ``scale`` shrinks the ranges
     towards the nominal values (curriculum: start narrow, widen later)."""
-    ranges = load_randomization() if ranges is None else ranges
+    ranges = load_randomization(hand=nominal.catch_mode) if ranges is None else ranges
     changes = {}
     for name, spec in ranges.items():
         nom = getattr(nominal, name)

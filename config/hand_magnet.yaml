@@ -1,0 +1,17 @@
+# Hand variant: magnet catch (PHYSICS_SPEC §4.1-§4.2, the default).
+# Overlay on config/params.yaml: Params.load(hand="magnet"). These are the same
+# values as params.yaml, listed here so the two hands can be compared side by side
+# (§4.4 table). Loading this overlay must give exactly the default parameter set.
+
+catch:
+  catch_mode: magnet
+
+arm:
+  l2: 0.015               # m, wrist axis -> string exit H
+  lc_offset: 0.02         # m, lc = l2 + 0.02 (CAD)
+  Ic_radius: 0.02         # m, Ic = mc * 0.02^2
+
+funnel:
+  d_cup: 0.045            # m, H -> mouth plane
+  seat_depth: 0.028       # m, straight seat section
+  F_mag0: 1.0             # N, magnet pull when seated
