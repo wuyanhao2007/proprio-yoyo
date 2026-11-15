@@ -28,5 +28,14 @@ controller:
   direction: auto         # "auto" = wind the string (sign sigma, A9); +1 / -1 to force
   q1_hold: true           # hold joint 1 at its current reference during the flip
 
+# Not physics: full-flow baseline settings (control/baseline.py, BaselineConfig.load("flip")).
+# Only the entries that differ from the BaselineConfig defaults (= magnet hand).
+baseline:
+  throw_t_turn: 0.3       # s, throw = turn the mouth from up to down. TODO(sysid) tune on hardware
+  throw_direction: -1     # sign of that turn; -1: the mouth passes the +x side (away from link 1)
+  apex_target: 0.15       # m, bounce apex; must stay outside the deeper cup (ell_mouth = 0.116 m)
+  a_up: 32.0              # m/s^2, no magnet pulls the yo-yo in: the catch pulse needs more hook speed
+  a_down: 9.0             # m/s^2, still below g (slack limit)
+
 randomization:
   F_mag0: null            # no magnet to randomize (null removes the entry from params.yaml)

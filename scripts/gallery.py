@@ -18,7 +18,8 @@ from pathlib import Path
 from sim.params import REPO_ROOT, Params
 
 RUNS = REPO_ROOT / "runs"
-MAIN_EVENTS = ("release", "bottom", "mouth", "seat_rebound", "stowed", "fail")
+MAIN_EVENTS = ("unseat", "release", "bottom", "mouth", "seat_rebound", "in_cup", "flip_start",
+               "drop", "stowed", "fail")
 
 CSS = """
 :root { --bg:#f7f7f5; --card:#fff; --fg:#222; --mute:#777; --ok:#2e7d32; --bad:#c62828; --line:#e3e3e0; }
@@ -82,6 +83,7 @@ def card(run: Path, nominal: dict) -> str:
     t_end = max((e["t"] for e in events), default=0.0)
     head = (f'<div class="head"><span class="name">{html.escape(run.name)}</span>'
             f'<span class="tag">{html.escape(str(meta.get("scenario", "")))}</span>'
+            f'<span class="tag">{html.escape(str(params.get("catch_mode", "magnet")))} hand</span>'
             f'<span class="{cls}">{outcome}</span>'
             f'<span class="tag">' + ", ".join(f"{k}×{counts[k]}" for k in MAIN_EVENTS if counts[k])
             + "</span></div>")

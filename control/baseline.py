@@ -28,15 +28,28 @@ Reference shaping. The driver runs a PD without a velocity reference
 (i ~ Kp (q_ref - q) - Kd q_dot, §6). Knowing the gains, the controller adds the
 feed-forward itself:  q_ref = q_des + (Kd q_dot_des + J q_dd_des) / Kp, and
 evaluates the desired trajectory ``lead`` seconds ahead (command latency).
+
+Hands (§4.4). The plan is written for the wrist-axis height E_y (``y`` below), and
+with the funnel pointing down the hook H = E + l2 a moves exactly like E, so the
+pulse logic is the same for both hands (lambda_yy does not depend on l2 there).
+What differs is selected by ``Params.catch_mode``; the numbers come from the
+``baseline`` block of config/hand_<hand>.yaml (``BaselineConfig.load``):
+  * throw: magnet = pull the yo-yo off the magnet (``Throw``); flip = turn the
+    mouth from up to down (``ThrowFlip``);
+  * apex_target must clear the deeper flip cup (ell_mouth = 0.116 m);
+  * catch: no magnet pulls the flip yo-yo in, it has to arrive on its own, and
+    it only enters IN_CUP; control/stow_flip.py then turns the hand mouth-up
+    (``control/full_flow.py`` chains the two controllers).
 """
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 
 from arm import dynamics as ad
-from control.trajectories import Throw
+from control.trajectories import Throw, ThrowFlip
 from sim.env import predict_time_to_bottom
+from sim.params import load_controller
 from yoyo.modes import Mode
 
 
@@ -64,6 +77,21 @@ class BaselineConfig:
     throw_t0: float = 0.2
     throw_acc: float = 8.0
     throw_t_acc: float = 0.12
+    # --- flip hand only (§4.4); values in the ``baseline`` block of hand_flip.yaml ---
+    throw_t_turn: float = 0.3     # mouth up -> down turn duration [s]
+    throw_direction: int = -1     # sign of that turn (-1: mouth passes the +x side)
+
+    @classmethod
+    def load(cls, hand: str | None = None, **overrides) -> "BaselineConfig":
+        """Dataclass defaults (= magnet hand), then the ``baseline`` block of
+        config/hand_<hand>.yaml, then keyword overrides."""
+        vals = load_controller(hand, "baseline") if hand is not None else {}
+        vals.update(overrides)
+        known = {f.name for f in fields(cls)}
+        unknown = set(vals) - known
+        if unknown:
+            raise ValueError(f"unknown baseline settings: {sorted(unknown)}")
+        return cls(**vals)
 
 
 @dataclass
@@ -139,7 +167,7 @@ def _post_bottom(t0, y0, v0, dv_J, pdt, a_dn):
 
     def drag(tau):  # velocity lost and its integral
         if tau <= 0:
-            return 0.0, 0.0
+            return 0.0, 0.0, 0.0
         if tau < pdt:
             F = (tau - math.sin(w * tau) / w) / pdt
             G = (tau * tau / 2 + (math.cos(w * tau) - 1) / (w * w)) / pdt
@@ -173,7 +201,15 @@ class ZlajpahBaseline:
         self.p = params
         self.cfg = cfg or BaselineConfig()
         c = self.cfg
-        self.throw = Throw(params.l1, t0=c.throw_t0, acc=c.throw_acc, t_acc=c.throw_t_acc)
+        if params.catch_mode == "flip":
+            self.throw = ThrowFlip(t0=c.throw_t0, t_turn=c.throw_t_turn, direction=c.throw_direction,
+                                   lead=params.cmd_delay)
+            self._t_throw_end = self.throw.t_end
+            self._phi_down = self.throw.phi_down       # mouth down, = -pi/2 mod 2 pi
+        else:
+            self.throw = Throw(params.l1, t0=c.throw_t0, acc=c.throw_acc, t_acc=c.throw_t_acc)
+            self._t_throw_end = c.throw_t0 + c.throw_t_acc
+            self._phi_down = -math.pi / 2
         self.y_hold = self.throw.hook_offset(1e9)
         self.seg: _Seg | None = None
         self.phase = "throw"
@@ -319,7 +355,7 @@ class ZlajpahBaseline:
         p, c, s = self.p, self.cfg, sim.s
         t = s.t
         if self.phase == "throw":
-            if s.released and t > c.throw_t0 + c.throw_t_acc + 0.15:
+            if s.released and t > self._t_throw_end + 0.15:
                 self.phase = "track"
                 self.seg = _cos_move(t, c.T_reposition, self.y_hold, c.y_base)
             else:
@@ -349,10 +385,11 @@ class ZlajpahBaseline:
             elif self.phase == "pulse" and not self._await_measure and self.seg is not None:
                 self.phase = "track"   # return segment running
 
-        phi2 = -math.pi / 2
+        phi2 = self._phi_down
         if (c.align_wrist and self.phase == "catch" and s.mode == Mode.TAUT
                 and s.elld < 0.0 and s.ell < c.align_below):
-            phi2 = min(max(s.theta, -c.align_max), c.align_max) - math.pi / 2  # funnel axis along u
+            # funnel axis along u
+            phi2 = self._phi_down + min(max(s.theta, -c.align_max), c.align_max)
         return self._refs(t, phi2)
 
     def summary(self) -> list[dict]:
