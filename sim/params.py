@@ -7,8 +7,8 @@ in the YAML file.
 
 Hand variants (§4.4) are overlays on params.yaml: ``Params.load(hand="flip")``
 reads ``config/hand_flip.yaml`` on top of the defaults. An overlay may also carry
-a ``randomization`` block (entries replace / ``null`` removes) and a
-``controller`` block (non-physics settings, see ``load_controller``).
+a ``randomization`` block (entries replace / ``null`` removes) and non-physics
+controller blocks (``controller``, ``baseline``; see ``load_controller``).
 """
 from __future__ import annotations
 
@@ -24,6 +24,7 @@ import yaml
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_YAML = REPO_ROOT / "config" / "params.yaml"
 CATCH_MODES = ("magnet", "flip")
+CONTROLLER_BLOCKS = ("controller", "baseline")   # hand-overlay blocks that are not physics
 
 
 def hand_path(hand: str | Path) -> Path:
@@ -219,7 +220,8 @@ def _read_yaml(path: str | Path | None) -> tuple[dict[str, Any], dict[str, Any]]
     with open(path) as f:
         raw = yaml.safe_load(f) or {}
     rand = raw.pop("randomization", {}) or {}
-    raw.pop("controller", None)
+    for block in CONTROLLER_BLOCKS:
+        raw.pop(block, None)
     values: dict[str, Any] = {}
     for section, entries in raw.items():
         if not isinstance(entries, Mapping):
@@ -267,11 +269,15 @@ def load_randomization(path: str | Path | None = None,
     return rand
 
 
-def load_controller(hand: str | Path) -> dict[str, Any]:
-    """The non-physics ``controller`` block of a hand overlay ({} if absent)."""
+def load_controller(hand: str | Path, block: str = "controller") -> dict[str, Any]:
+    """A non-physics block of a hand overlay ({} if absent): ``controller`` holds the
+    flip-stow settings (control/stow_flip.py), ``baseline`` overrides
+    ``BaselineConfig`` defaults (control/baseline.py)."""
+    if block not in CONTROLLER_BLOCKS:
+        raise ValueError(f"unknown controller block {block!r}")
     with open(hand_path(hand)) as f:
         raw = yaml.safe_load(f) or {}
-    return dict(raw.get("controller") or {})
+    return dict(raw.get(block) or {})
 
 
 def sample_params(
