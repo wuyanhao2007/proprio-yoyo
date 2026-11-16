@@ -6,6 +6,9 @@ Next is stage 2: design sweeps and CMA-ES. See "Baseline and margins" below.
 
 Physics reference: [PHYSICS_SPEC.md](PHYSICS_SPEC.md). Every formula in the code cites its section, e.g. `# §3.2`.
 
+**Working on hardware or firmware?** Start with [docs/EMBEDDED_HANDBOOK.md](docs/EMBEDDED_HANDBOOK.md). It also
+holds the project's progress log: update its §1 with every commit.
+
 ## Setup
 ```bash
 conda activate yoyo            # project env (Python 3.11)
