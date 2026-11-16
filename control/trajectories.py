@@ -57,3 +57,44 @@ class Throw:
         if self.q1_after is not None and t > self.t0 + self.t_acc + self.t_settle:
             q1 = self.q1_after
         return funnel_down_refs(q1)
+
+
+@dataclass
+class ThrowFlip:
+    """Open-loop throw of the flip hand (§4.4): no magnet, so the throw is "turn the
+    mouth from up to down" and the yo-yo slides out by itself (events unseat ->
+    release). Joint 1 holds still; the absolute funnel angle follows a raised-cosine
+    velocity profile from ``phi_up`` over ``t_turn`` seconds.
+
+    ``direction`` = sign of the turn (-1: the mouth passes the +x side, away from
+    link 1). TODO(sysid): which side the real cup can pass (fork clearance), and the
+    best t_turn; a slow turn pours the yo-yo out with little sideways speed.
+    """
+    t0: float = 0.2
+    t_turn: float = 0.3
+    direction: int = -1
+    q1: float = 0.0
+    phi_up: float = math.pi / 2
+    lead: float = 0.0               # evaluate the profile this far ahead (command latency)
+
+    def __post_init__(self):
+        from yoyo.catch_flip import cosine_flip
+        if self.direction not in (1, -1):
+            raise ValueError(f"direction must be 1 or -1, got {self.direction!r}")
+        self._profile = cosine_flip(self.t_turn, phi0=self.phi_up, direction=self.direction, t0=self.t0)
+
+    @property
+    def t_end(self) -> float:
+        return self.t0 + self.t_turn
+
+    @property
+    def phi_down(self) -> float:
+        """Absolute funnel angle after the throw (mouth down, = -pi/2 mod 2 pi)."""
+        return self.phi_up + self.direction * math.pi
+
+    def hook_offset(self, t: float) -> float:
+        return 0.0                  # the wrist axis does not move during this throw
+
+    def __call__(self, sim):
+        phi2 = self._profile(sim.s.t + self.lead)[0]
+        return self.q1, phi2 - self.q1

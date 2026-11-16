@@ -3,6 +3,8 @@ import numpy as np
 import pytest
 
 from control.baseline import BaselineConfig, ZlajpahBaseline
+from control.full_flow import catch_report, make_full_flow, reset_full_flow
+from control.trajectories import ThrowFlip
 from sim.params import Params
 from sim.simulator import Simulator
 from yoyo.modes import Mode
@@ -45,3 +47,71 @@ def test_zlajpah_sustains_20_bounces():
     assert len(apex) >= 19
     assert apex[-5:].mean() < apex[:5].mean() + 0.02          # no decay (l grows if it decays)
     assert np.all(np.abs(apex - ctrl.cfg.apex_target) < 0.06)
+
+
+# ------------------------------------------------------------- flip hand (§4.4)
+MAIN = ("unseat", "release", "bottom", "in_cup", "flip_start", "drop", "seat_rebound", "stowed", "fail")
+FLIP_FLOW = ["unseat", "release", "bottom", "bottom", "bottom", "in_cup", "flip_start", "stowed"]
+
+
+def _run_flip(seed=0, duration=10.0, **params):
+    p = Params.load(hand="flip", i_peak_ratio=2.0, **params)
+    sim = Simulator(p, rng=np.random.default_rng(seed))
+    ctrl, base = make_full_flow(p)
+    reset_full_flow(sim)
+    sim.run(duration, ctrl)
+    return p, sim, base
+
+
+def _check_flip_flow(p, sim, base):
+    main = [e["type"] for e in sim.events if e["type"] in MAIN]
+    assert main == FLIP_FLOW, (main, sim.s.fail_reason)
+    assert sim.s.mode == Mode.STOWED and sim.s.caught
+    assert np.sin(sim.s.phi2) > np.cos(p.stow_tilt_max)            # stowed mouth up
+    r = catch_report(sim)
+    assert 0.0 < r["v_arrive"] < p.v_cap_max                       # no magnet: it arrives by itself
+    assert abs(r["theta_arrive_deg"]) < 15.0
+    assert r["i2_peak"] <= p.i_max2 + 1e-9
+    sigma = [e for e in sim.events if e["type"] == "bottom"][-1]["sigma"]
+    assert r["flip_direction"] == sigma                            # A9: turn with sign sigma
+    for rec in base.pulses[:2]:                                    # normal bounces stay out of the cup
+        assert rec.apex > p.ell_mouth
+
+
+@pytest.mark.parametrize("seed", [0, 1, 2])
+def test_flip_full_flow_throw_three_bounces_catch_stow(seed):
+    """Flip hand: turn-down throw -> 3 bottoms -> seat (IN_CUP) -> flip -> STOWED."""
+    _check_flip_flow(*_run_flip(seed))
+
+
+def test_flip_full_flow_with_cogging():
+    """Seeds only change sensor noise, which the PD never sees, so seeds 0-2 above
+    follow one physical trajectory. With cogging torque (random phases) the seed
+    changes the arm motion itself: two really different runs."""
+    runs = [_run_flip(seed, cogging_amp=0.02) for seed in (0, 1)]
+    for run in runs:
+        _check_flip_flow(*run)
+    q1a, q1b = (sim.log.arrays()["q1"] for _, sim, _ in runs)
+    assert not np.array_equal(q1a, q1b)
+
+
+def test_flip_baseline_config_comes_from_the_hand_overlay():
+    """hand_flip.yaml ``baseline`` block overrides the defaults; magnet has no block."""
+    assert BaselineConfig.load("magnet") == BaselineConfig() == BaselineConfig.load()
+    c = BaselineConfig.load("flip")
+    assert c.apex_target > Params.load(hand="flip").ell_mouth
+    assert c.a_down < Params.load().g                              # slack limit
+    assert BaselineConfig.load("flip", n_bounces=5).n_bounces == 5
+    with pytest.raises(ValueError):
+        BaselineConfig.load("flip", no_such_setting=1)
+
+
+def test_throw_flip_profile_ends_mouth_down():
+    th = ThrowFlip(t0=0.2, t_turn=0.3, direction=-1)
+    sim = type("S", (), {"s": type("s", (), {"t": 0.0})()})()
+    assert th(sim) == (0.0, pytest.approx(np.pi / 2))              # starts mouth up
+    sim.s.t = 1.0
+    assert th(sim)[1] == pytest.approx(-np.pi / 2) and th.phi_down == pytest.approx(-np.pi / 2)
+    assert np.sin(ThrowFlip(direction=1).phi_down) == pytest.approx(-1.0)
+    with pytest.raises(ValueError):
+        ThrowFlip(direction=0)

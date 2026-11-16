@@ -122,3 +122,78 @@ def test_static_hold_stowed():
     assert sim.s.mode == Mode.STOWED
     assert abs(sim.s.q1 - q0[0]) < 2e-3 and abs(sim.s.phi2 - q0[1]) < 2e-3
     assert abs(sim.motor.i1) < p.i_max1
+
+
+# ------------------------------------------------------------ flip hand, l2 < 0 (§4.4)
+@pytest.mark.parametrize("stowed", [False, True])
+@pytest.mark.parametrize("q1,phi2", POSES)
+def test_flip_hand_l2_negative_gravity_and_jacobian(q1, phi2, stowed):
+    """§4.4: the §5 formulas are unchanged for the flip hand, l2 = -ell_min < 0.
+    Gravity = sum of point-mass moments (= dV/dq), Jacobian = finite differences."""
+    p = Params.load(hand="flip")
+    assert p.l2 < 0
+    c = ad.link_constants(p, stowed, yoyo_spin=True)
+    g = p.g
+    E = np.array(ak.elbow(p.l1, q1))
+    a = np.array([math.cos(phi2), math.sin(phi2)])
+    link1 = [(p.m1, E / 2), (p.m_e, E)]
+    link2 = [(p.m2, E + a * p.l2 / 2), (p.mc, E + a * p.lc)]
+    if stowed:
+        link2.append((p.m, E + a * (p.l2 + p.ell_min)))
+    G1 = sum(m * g * pos[0] for m, pos in link1) + sum(m * g * E[0] for m, _ in link2)
+    G2 = sum(m * g * (pos[0] - E[0]) for m, pos in link2)
+    g1, g2 = ad.gravity(c, q1, phi2)
+    assert g1 == pytest.approx(G1, rel=1e-12)
+    assert g2 == pytest.approx(G2, rel=1e-12, abs=1e-15)
+    eps = 1e-6
+    pe = lambda q1_, f2_: ad.energy(c, q1_, f2_, 0.0, 0.0)
+    assert g1 == pytest.approx((pe(q1 + eps, phi2) - pe(q1 - eps, phi2)) / (2 * eps), rel=1e-7)
+    assert g2 == pytest.approx((pe(q1, phi2 + eps) - pe(q1, phi2 - eps)) / (2 * eps), rel=1e-6, abs=1e-12)
+    J = np.array(ak.hook_jacobian(p.l1, p.l2, q1, phi2))
+    H0 = np.array(ak.hook(p.l1, p.l2, q1, phi2))
+    Jn = np.column_stack([
+        (np.array(ak.hook(p.l1, p.l2, q1 + 1e-7, phi2)) - H0) / 1e-7,
+        (np.array(ak.hook(p.l1, p.l2, q1, phi2 + 1e-7)) - H0) / 1e-7,
+    ])
+    assert np.allclose(J, Jn, atol=1e-6)
+    # H sits on the far side of the wrist axis from the funnel mouth (+a)
+    assert (H0 - E) @ a == pytest.approx(p.l2)
+
+
+@pytest.mark.parametrize("stowed", [False, True])
+def test_flip_hand_matches_sympy(stowed):
+    """The symbolic derivation declares l2 positive; check it still agrees for l2 < 0."""
+    from arm.derive_sympy import numeric_functions
+    f = numeric_functions()
+    p = Params.load(hand="flip")
+    c = ad.link_constants(p, stowed)
+    vals = dict(l1=p.l1, l2=p.l2, m1=p.m1, m2=p.m2, mc=p.mc, lc=p.lc, Ic=p.Ic, m_e=p.m_e,
+                N1=p.N1, Jr1=p.Jr1, Jr2=p.Jr2, g=p.g,
+                m_y=p.m if stowed else 0.0, d_y=p.l2 + p.ell_min)
+    rng = np.random.default_rng(3)
+    for _ in range(5):
+        q = rng.uniform(-3, 3, 2)
+        qd = rng.uniform(-10, 10, 2)
+        Ms, hs = f(vals, q, qd)
+        m11, m12, m22 = ad.mass_matrix(c, *q)
+        h1, h2 = ad.bias_forces(c, *q, *qd)
+        assert np.allclose(np.array(Ms, dtype=float), [[m11, m12], [m12, m22]], rtol=1e-10, atol=1e-14)
+        assert np.allclose(np.array(hs, dtype=float).ravel(), [h1, h2], rtol=1e-10, atol=1e-12)
+
+
+def test_flip_hand_arm_energy_conservation():
+    """Test 11 with l2 < 0 (arm alone, no friction, no input)."""
+    p = Params.load(hand="flip", b1=0.0, b2=0.0, tc1=0.0, tc2=0.0)
+    sim = Simulator(p, sensor_noise=False, log=False)
+    sim.reset_stowed()
+    sim.s.mode = int(Mode.FAIL)
+    sim._tau = (0.0, 0.0)
+    y = [0.3, 0.5, 0.0, 2.0]
+    c = sim.c_free
+    E0 = ad.energy(c, *y)
+    t, swing = 0.0, 0.0
+    for _ in range(10000):
+        y = sim._rk4(t, y, p.dt, Mode.FAIL)
+        t += p.dt
+        swing = max(swing, abs(ad.energy(c, *y) - E0))
+    assert swing / (c.G1 + abs(c.g * c.S2)) < 1e-8

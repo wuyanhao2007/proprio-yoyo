@@ -29,6 +29,7 @@ from arm.sensors import Sensors
 from sim.log import SimLog
 from sim.params import Params
 from yoyo import dynamics as yd
+from yoyo.catch import make_catch
 from yoyo.funnel import FunnelGeometry, magnet_force, wall_damping
 from yoyo.modes import Mode
 
@@ -81,6 +82,13 @@ class SimState:
     sigma: int = 1
     ell_s: float = 0.0
     inside: bool = False
+    # IN_CUP (flip catch, §4.4): slide distance from the seat, its rate, slack string
+    # length beyond the geometric one, time seated mouth-up, how the cup was entered
+    cup_s: float = 0.0
+    cup_sd: float = 0.0
+    cup_gap: float = 0.0
+    cup_hold: float = 0.0
+    cup_entry: str = ""
     # bottom force pulse on the hook (§3.6)
     pulse_t0: float = -1.0
     pulse_J: float = 0.0
@@ -130,6 +138,7 @@ class Diag:
     tau_wrist_rope: float = 0.0
     delta: float = 0.0
     F_in: float = 0.0
+    N_seat: float = 0.0     # IN_CUP: seat normal force
     contact: bool = False
 
 
@@ -144,7 +153,9 @@ class Simulator:
         self.rng = rng if rng is not None else np.random.default_rng()
         self.funnel = FunnelGeometry(params) if params.capture_model != "none" else None
         self.c_free = ad.link_constants(params, stowed=False)
-        self.c_stow = ad.link_constants(params, stowed=True)
+        # flip: the seated yo-yo also turns with the cup, so its spin inertia rides on link 2
+        self.c_stow = ad.link_constants(params, stowed=True,
+                                        yoyo_spin=params.catch_mode == "flip")
         self.c_wall = wall_damping(params, params.m)
         self.s = SimState()
         self.motor = am.MotorState(cog_phase=am.random_cogging_phases(self.rng))
@@ -155,6 +166,7 @@ class Simulator:
         self.diag = Diag()
         self._tau = (0.0, 0.0)
         self._prev_d = 0.0          # last H-yo-yo distance seen by the mouth check
+        self.catch = make_catch(self)
 
     # ======================================================= initial conditions
     def reset_stowed(self, q1_ref: float = 0.0, q2_ref: float = -math.pi / 2):
@@ -179,6 +191,14 @@ class Simulator:
             s.inside = True
         self._finish_reset()
         return s
+
+    def reset_in_cup(self, s: float = 0.0, sd: float = 0.0, q1_ref: float = 0.0,
+                     q2_ref: float = -math.pi / 2, sigma: int = 1, entry: str = "catch"):
+        """Flip catch (§4.4): yo-yo in the cup, ``s`` from the seat, arm holding still.
+        ``entry="catch"`` = it has just arrived after a throw, ``"throw"`` = never thrown."""
+        if self.p.catch_mode != "flip":
+            raise ValueError("reset_in_cup needs catch_mode = 'flip'")
+        return self.catch.reset_in_cup(s, sd, q1_ref, q2_ref, sigma, entry)
 
     def _place_arm_static(self, q1_ref, q2_ref, hanging: bool):
         s, p = self.s, self.p
@@ -271,6 +291,8 @@ class Simulator:
             return arm + [s.ell, s.elld, s.theta, s.thetad]
         if s.mode == Mode.FREE:
             return arm + [s.px, s.py, s.vx, s.vy, s.omega, s.ell_s]
+        if s.mode == Mode.IN_CUP:
+            return arm + self.catch.pack()
         return arm
 
     def _unpack(self, y, mode, t):
@@ -297,6 +319,8 @@ class Simulator:
                 s.thetad = ((s.vx - Hd[0]) * -uy + (s.vy - Hd[1]) * ux) / d
         elif mode == Mode.STOWED:
             self._sync_stowed_yoyo()
+        elif mode == Mode.IN_CUP:
+            self.catch.unpack(y, t)
 
     # ================================================================ dynamics
     def _pulse(self, t):
@@ -405,6 +429,8 @@ class Simulator:
 
     def _deriv(self, t, y, mode, want_diag=False):
         p, s = self.p, self.s
+        if mode == Mode.IN_CUP:
+            return self.catch.deriv(t, y, want_diag)
         arm = y[0:4]
         Fbx, Fby = self._pulse(t)
         dg = Diag() if want_diag else None
@@ -555,6 +581,8 @@ class Simulator:
             if self.funnel is not None:
                 v_r = ((y[6] - Hd[0]) * rx + (y[7] - Hd[1]) * ry) / max(d, 1e-9)
                 out["seat"] = (p.ell_min - d, v_r < 0.0)
+        elif mode == Mode.IN_CUP:
+            out.update(self.catch.event_fn(t, y))
         return out
 
     def _find_event(self, t0, y0, y1, mode, h):
@@ -581,6 +609,8 @@ class Simulator:
             self._event_seat()
         elif name == "snap":
             self._event_snap()
+        else:
+            self.catch.apply_event(name)
 
     def _event_bottom(self):
         """§3.6"""
@@ -655,68 +685,14 @@ class Simulator:
         s.omega = s.sigma * s.elld / r
 
     def _event_seat(self):
-        """§4.2 step 3: slow -> STOWED, fast -> rebound (TAUT or, amendment, FREE)."""
-        s, p = self.s, self.p
-        H, Hd, _ = self._hook_kin(s.t, s.q1, s.phi2, s.q1d, s.phi2d)
-        if s.mode == Mode.TAUT:
-            (ux, uy), _ = yd.string_dirs(s.theta)
-            v = -s.elld
-        else:
-            rx, ry = s.px - H[0], s.py - H[1]
-            d = math.hypot(rx, ry)
-            ux, uy = rx / d, ry / d
-            v = -((s.vx - Hd[0]) * ux + (s.vy - Hd[1]) * uy)
-        if v < p.v_cap_max:
-            self._stow(v)
-            return
-        if not self.kin:  # impulse on the hook -m (1 + e_cup) v u (§4.2)
-            Jimp = -p.m * (1 + p.e_cup) * v
-            terms = self._arm_solve_terms(s.t, [s.q1, s.phi2, s.q1d, s.phi2d], False, 0.0, 0.0)
-            (i11, i12, i22), ((j00, j01), (j10, j11)) = terms[6], terms[7]
-            g1, g2 = j00 * Jimp * ux + j10 * Jimp * uy, j01 * Jimp * ux + j11 * Jimp * uy
-            s.q1d += i11 * g1 + i12 * g2
-            s.phi2d += i12 * g1 + i22 * g2
-        H, Hd, _ = self._hook_kin(s.t, s.q1, s.phi2, s.q1d, s.phi2d)
-        if s.mode == Mode.TAUT:
-            s.elld = p.e_cup * v
-            s.ell = p.ell_min
-            self._sync_taut_cartesian(H, Hd)
-        else:  # reverse the radial relative velocity, keep the tangential one
-            vrx, vry = s.vx - Hd[0], s.vy - Hd[1]
-            dv = (1.0 + p.e_cup) * v
-            s.vx, s.vy = Hd[0] + vrx + dv * ux, Hd[1] + vry + dv * uy
-        self._record("seat_rebound", v=v, e_cup=p.e_cup)
+        """§4.2 / §4.4 seat arrival, handled by the catch mode."""
+        self.catch.event_seat()
 
     def _stow(self, v):
-        s, p = self.s, self.p
-        if not self.kin:  # perfectly inelastic merge: conserve generalized momentum
-            m11, m12, m22 = ad.mass_matrix(self.c_free, s.q1, s.phi2)
-            g1 = m11 * s.q1d + m12 * s.phi2d
-            g2 = m12 * s.q1d + m22 * s.phi2d
-            sx, sy = self._stow_point(s.q1, s.phi2)
-            (j00, j01), (j10, j11) = ak.world_point_jacobian(p.l1, s.q1, s.phi2, sx, sy)
-            g1 += j00 * p.m * s.vx + j10 * p.m * s.vy
-            g2 += j01 * p.m * s.vx + j11 * p.m * s.vy
-            n11, n12, n22 = ad.mass_matrix(self.c_stow, s.q1, s.phi2)
-            s.q1d, s.phi2d = ad.solve2(n11, n12, n22, g1, g2)
-        s.mode = int(Mode.STOWED)
-        s.inside = True
-        s.caught = True
-        s.t_caught = s.t
-        s.pulse_t0 = -1.0
-        self._sync_stowed_yoyo()
-        self._record("stowed", v=v)
+        self.catch.stow(v)
 
     def _release(self, F_in):
-        """§4.1 magnet lets go: FREE with the seat point's velocity."""
-        s, p = self.s, self.p
-        self._sync_stowed_yoyo()
-        s.mode = int(Mode.FREE)
-        s.omega, s.sigma, s.ell_s = 0.0, 1, p.ell_min
-        s.inside = False
-        s.released = True
-        s.caught = False
-        self._record("release", F_in=F_in, vx=s.vx, vy=s.vy)
+        self.catch.release(F_in)
 
     def _to_free(self, T):
         s = self.s
@@ -778,8 +754,9 @@ class Simulator:
     def _step_end_checks(self):
         s, p, dg = self.s, self.p, self.diag
         if s.mode == Mode.STOWED:
-            if dg.F_in > p.F_mag0:
-                self._release(dg.F_in)
+            self.catch.step_end_stowed(dg)
+        elif s.mode == Mode.IN_CUP:
+            self.catch.step_end_in_cup()
         elif s.mode == Mode.TAUT and dg.T < SLACK_T:
             self._to_free(dg.T)
         if s.mode in (Mode.TAUT, Mode.FREE) and self.funnel is not None:

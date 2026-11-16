@@ -67,7 +67,7 @@ class YoyoEnv:
         self.nominal = params if params is not None else Params.load()
         self.randomize = randomize
         self.rand_scale = rand_scale
-        self.ranges = load_randomization()
+        self.ranges = load_randomization(hand=self.nominal.catch_mode)
         self.max_delta = max_delta
         self.episode_time = episode_time
         self.hold_time = hold_time

@@ -31,7 +31,9 @@ class LinkConstants:
     g: float
 
 
-def link_constants(p: Params, stowed: bool) -> LinkConstants:
+def link_constants(p: Params, stowed: bool, yoyo_spin: bool = False) -> LinkConstants:
+    """``yoyo_spin``: the stowed yo-yo also turns with link 2 (flip catch, §4.3),
+    so its spin inertia I adds to J2. The magnet model leaves it out."""
     l1, l2 = p.l1, p.l2
     M2 = p.m2 + p.mc
     S2 = p.m2 * l2 / 2 + p.mc * p.lc
@@ -41,6 +43,8 @@ def link_constants(p: Params, stowed: bool) -> LinkConstants:
         M2 += p.m
         S2 += p.m * d
         J2 += p.m * d * d
+        if yoyo_spin:
+            J2 += p.I
     J1 = p.m1 * l1**2 / 3 + p.m_e * l1**2 + p.N1**2 * p.Jr1
     G1 = p.g * (p.m1 * l1 / 2 + p.m_e * l1 + M2 * l1)
     return LinkConstants(J1=J1, M2=M2, S2=S2, J2=J2, G1=G1, l1=l1, g=p.g)
