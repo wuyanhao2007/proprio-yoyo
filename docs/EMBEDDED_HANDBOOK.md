@@ -22,7 +22,7 @@ gravity holds the yo-yo. The magnet hand still exists in the code as the default
 | Stage | What | Status | Owner |
 |---|---|---|---|
 | 1 Simulation v1 | numpy simulator, funnel, arm, motors, sensors, env, animation | **done** | Yanhao |
-| 1+ Flip hand in sim | IN_CUP model, flip controller, tests | **done** (full throw → bounce → flip-catch flow not wired yet) | Yanhao |
+| 1+ Flip hand in sim | IN_CUP model, flip controller, full throw → bounce → catch → flip-stow flow, tests | **done** | Yanhao |
 | 2 Design freeze | sweeps, pick motors/ratios/arm lengths/funnel, design sheet | **next** | Yanhao (sim) |
 | 3 Hardware | print, assemble, motor firmware, comms, safety | **not started**, can start now in parallel (§5, E0–E6) | Arthur |
 | 4 SysID + step-by-step on hardware | measure real parameters; throw → bounce → catch | not started | both |
@@ -51,8 +51,10 @@ Add one row per commit that changes anything meaningful, from either of us.
 
 | Date | Commit | Who | What changed | Next |
 |---|---|---|---|---|
-| 2026-11-15 | (this commit) | Yanhao | Added this handbook | Teammate: order the bench kit (E0), read §4 |
-| 2026-11-14 | a361940 | Yanhao | Flip catch in the simulator: `IN_CUP` mode, amendment A9 (flip direction must follow the string winding sign σ), `control/stow_flip.py`, 80 tests pass, magnet hand bit-identical | Wire the full flip flow; stage-2 sweeps |
+| 2026-11-15 | (this commit) | Yanhao | Merged PR #1 into main; progress log updated | Stage-2 sweeps; teammate: E0 |
+| 2026-11-15 | 78ec9af | Yanhao | Added this handbook, README link, PR template | Teammate: order the bench kit (E0), read §4 |
+| 2026-11-14 | e81b4e2 (PR #1) | Yanhao | Flip hand full flow: turn-down throw → 3 bounces → catch → flip stow (`control/full_flow.py`), `scripts/golden.py` refactor guard, 86 tests | Stage-2 sweeps |
+| 2026-11-14 | a361940 | Yanhao | Flip catch in the simulator: `IN_CUP` mode, amendment A9 (flip direction must follow the string winding sign σ), `control/stow_flip.py`, 80 tests pass, magnet hand bit-identical | Wire the full flip flow |
 | 2026-11-14 | 90335da | Yanhao | Runs gallery page (`python -m scripts.gallery --open`), conda env note | |
 | 2026-11-14 | 2ab04b5 | Yanhao | Stage-1 simulator, env, visualization, pulse baseline (throw → 3 bounces → catch, 12/12 nominal) | |
 | 2026-11-13 | 69d91e2 | Yanhao | Initial commit | |
