@@ -67,8 +67,8 @@ class ThrowFlip:
     velocity profile from ``phi_up`` over ``t_turn`` seconds.
 
     ``direction`` = sign of the turn (-1: the mouth passes the +x side, away from
-    link 1). TODO(sysid): which side the real cup can pass (fork clearance), and the
-    best t_turn; a slow turn pours the yo-yo out with little sideways speed.
+    link 1). With an even number of bottoms the stow flip returns on the same side,
+    so the cup never passes link 1. TODO(sysid): the best t_turn; a slow turn pours the yo-yo out with little sideways speed.
     """
     t0: float = 0.2
     t_turn: float = 0.3

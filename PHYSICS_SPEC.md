@@ -347,21 +347,20 @@ With `F_mag0 = 0` the throw is "turn the mouth down": as soon as it tilts below 
   velocity), joint 1 holds. Nominal: `unseat` at 0.37 s, `release` at 0.59 s with 0.41 m/s along the axis.
 - Bounces: the baseline plans the wrist-axis height E_y. With the funnel down, `Jac[1][1] = l2 cos φ2 = 0`,
   so H moves like E and `λ_yy` is the same for both hands (5.48 1/kg at q1 = 0): the hook stroke needs no
-  re-derivation for l2 < 0. Only `apex_target` moves (0.15 m, outside `ell_mouth` = 0.116 m).
+  re-derivation for l2 < 0. `apex_target` = 0.12 m: the top of the yo-yo dips 1–3 cm into the flare at every
+  apex (`ell_mouth` = 0.116 m) but stays out of the straight seat (`ell_min + s_max` = 0.061 m). Bouncing with
+  the apex outside the cup (0.15 m) also works at nominal but is far less robust (5/60 against 35/60 randomized
+  runs at 10 % of the ranges). TODO(sysid): this leans on the wall-contact model (`mu_wall`, `e_wall`).
 - Catch: no magnet pulls the yo-yo in, so it must reach the seat with `0 < v < v_cap_max` by itself. The
-  magnet settings stall 3 mm short; the flip settings use `a_up` = 32 m/s², `a_down` = 9 m/s² (hook pulse
-  2.04 m/s instead of 1.80). Nominal arrival: 0.22 m/s, string swing +0.5°. Then `StowFlip` with direction
-  "auto" = σ.
-- With an odd number of bottoms σ = −1 at the catch, so the throw (−180°) and the stow flip (−180°) add up to
-  one full wrist turn per cycle, and the cup passes both the +x and the −x side of the wrist axis. The GM3506
-  with its AS5048A encoder turns continuously and no wires cross the wrist, but the fork must clear the cup
-  (mouth edge 5.7 cm from the axis) on the link-1 side. TODO(CAD).
+  magnet settings stall 3 mm short; the flip settings use `a_up` = 29 m/s², `a_down` = 9 m/s². Nominal
+  arrival: 0.32 m/s, string swing −0.9°. Then `StowFlip` with direction "auto" = σ.
+- Number of bottoms: 4 (`n_bounces`), not 3. σ alternates at every bottom and the stow flip must turn with
+  sign σ (A9). With an even count σ = +1 at the catch: the stow flip (+180°) undoes the throw (−180°), the
+  mouth stays on the +x side (away from link 1) and the wrist makes no net turn per cycle. With an odd count
+  the two add up to one full turn and the cup (mouth edge 5.7 cm from the axis) has to pass link 1.
 - Wrist current reaches the limit (`i_peak_ratio` = 2, 3.2 A) during the flip and at the STOWED merge; 0.05 s
   above continuous in total.
-- Margin (single-parameter changes, everything else nominal): succeeds for m ±3 %, `eta1` ±3 %, `Kt1` ±3 %,
-  `mu_wall` 0.1–0.45, cogging 2 %; fails for `r0` −3 %, `L` +3 %, `I_coef` +3 % (swing grows after the first
-  pulse → `hit_rim`), `mu_wall` = 0.6 and `c_loss` = 0.95 (stalls before the seat), `use_back_emf` and
-  `variable_radius`. As thin as the magnet hand's margin: a stage-2 design question, all TODO(sysid).
+- Margin: see the randomized sweep, `python -m scripts.mech_sweep` (README "Mechanics sweep").
 
 ## 5. Arm dynamics
 
@@ -485,7 +484,8 @@ Flip catch (§4.4, `tests/test_catch_flip.py`):
 - F4. `catch_mode = "magnet"`: tests 1–12 unchanged (and bit-identical logs before/after the refactor).
 - Plus: the A9 formula, seated mass matrix = stowed constants, energy conservation of the coupled IN_CUP system,
   and §5 gravity/Jacobian/sympy/energy for l2 < 0 (`tests/test_arm.py`).
-- F5. Flip full flow (`tests/test_baseline.py`): unseat → release → 3 bottoms → in_cup → flip_start → stowed,
+- F5. Flip full flow (`tests/test_baseline.py`): unseat → release → 4 bottoms → in_cup → flip_start → stowed,
+  the stow flip opposite to the throw (no net wrist turn, mouth never on the link-1 side),
   seeds 0–2 plus two runs with cogging (the seed alone only changes sensor noise, not the motion).
 - The magnet full flow stays bit-identical across refactors: `python -m scripts.golden record | check`.
 
