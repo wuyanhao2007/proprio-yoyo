@@ -21,7 +21,7 @@ Run everything from the repo root (the folders are not installed as a package). 
 ```bash
 python -m scripts.run_demo full_flow               # throw -> 3 bounces -> catch (step 9)
 python -m scripts.run_demo full_flow --n-bounces 0 --duration 30   # keep bouncing
-python -m scripts.run_demo full_flow --hand flip   # flip hand: turn-down throw -> 3 bounces -> catch -> flip stow
+python -m scripts.run_demo full_flow --hand flip   # flip hand: turn-down throw -> 4 bounces -> catch -> flip stow
 python -m scripts.run_demo throw_bounce            # stowed -> throw -> passive bounces
 python -m scripts.run_demo funnel_catch            # climbing yo-yo meets the funnel
 python -m scripts.run_demo funnel_catch --theta0 9 --v0 0.9 --set mu_wall=0.1
@@ -29,6 +29,7 @@ python -m scripts.run_demo flip_stow               # flip hand: yo-yo in the sea
 python -m scripts.run_demo flip_stow --direction wrong   # turning the other way drops it
 python -m scripts.run_demo flip_catch --theta0 0   # flip hand: climb into the cup, then flip
 python -m scripts.funnel_sweep                     # capture map: swing angle x climb speed
+python -m scripts.mech_sweep run --n 1000          # stage 2: 1000 randomized full flows per hand (~15 min, 12 cores)
 python -m viz.plot_funnel                          # funnel cross-sections -> runs/funnel_profile.png
 python -m viz.animate runs/<run_dir> --speed 0.25  # re-render a saved run (or --show)
 ```
@@ -71,6 +72,7 @@ viz/
 scripts/
   run_demo.py          demo scenarios
   funnel_sweep.py      capture-outcome table for funnel design
+  mech_sweep.py        stage 2: randomized full flows in parallel, staged score, load distributions
   gallery.py           runs/index.html overview of all runs
   golden.py            record / check bit-identical magnet full-flow logs (refactor guard)
 tests/                 test_yoyo (1-6), test_funnel (7-8), test_arm (9-11), test_baseline (12), test_env,
@@ -119,13 +121,51 @@ Both hands run the same full flow through `control/full_flow.py`:
 from control.full_flow import make_full_flow, reset_full_flow, catch_report
 p = Params.load(hand="flip", i_peak_ratio=2.0)
 sim = Simulator(p); ctrl, base = make_full_flow(p); reset_full_flow(sim)
-sim.run(10.0, ctrl); catch_report(sim)     # arrival speed, swing angle, wrist current peak
+sim.run(13.0, ctrl); catch_report(sim)     # arrival speed, swing angle, wrist current peak
 ```
 The flip hand has no magnet, so its throw is "turn the mouth down" (`ThrowFlip`) and the yo-yo has to reach
 the seat on its own. Its baseline settings (`apex_target`, `a_up`, `a_down`, throw timing) are the `baseline`
-block of `config/hand_flip.yaml`; the magnet hand uses the `BaselineConfig` defaults. Nominal flip result:
-arrival 0.22 m/s with 0.5° swing, wrist current at its 2× limit during the flip. The margin is as thin as the
-magnet hand's (§4.4 lists which ±3 % changes break it).
+block of `config/hand_flip.yaml`; the magnet hand uses the `BaselineConfig` defaults. The flip hand bounces
+4 times, not 3: the stow flip has to turn with the winding sign σ (A9), σ alternates at every bottom, and an
+even count turns the hand back the way the throw came, so the cup never passes link 1 and the wrist makes no
+net turn per cycle. Nominal flip result: arrival 0.32 m/s with −0.9° swing, wrist current at its 2× limit
+during the flip.
+
+## Mechanics sweep (stage 2)
+`scripts/mech_sweep.py` draws parameter sets from the `randomization` block of `config/params.yaml`, runs the
+full flow of both hands on the same draws (`ProcessPoolExecutor`, one row per case in
+`runs/sweeps/<name>/results.csv`) and plots load distributions, a stage funnel and score-vs-parameter curves.
+`--scale` shrinks the ranges towards nominal. Besides stowed / not stowed every run gets a staged score, 0.25
+per stage passed in order: `throw` (released, first bottom reached), `bounce1` (first apex in range, second
+bottom), `bounces` (the rest, up to the last bottom), `catch` (STOWED).
+
+Results with the nominal controller, current limit 2× continuous (1000 runs per hand at scale 1 and 0.1, 200
+at the others; flip hand = 4 bottoms, magnet hand = 3):
+
+| scale | magnet stowed | magnet score | flip stowed | flip score |
+|---|---|---|---|---|
+| 0.05 | 78.5 % | 0.95 | 92.0 % | 0.96 |
+| 0.1 | 30.5 % | 0.83 | 56.1 % | 0.85 |
+| 0.2 | 6.0 % | 0.76 | 23.5 % | 0.77 |
+| 0.35 | 2.5 % | 0.68 | 6.5 % | 0.64 |
+| 1 (full ranges) | 0.3 % | 0.37 | 0.3 % | 0.38 |
+
+- The throw never fails. The catch is the first stage to go (already at 5–10 % of the ranges); the bounces
+  hold until about 20 %. At the full ranges only 35–45 % of the runs get past the first bounce.
+- The flip settings were re-tuned on 60 of these draws (scale 0.1) and the magnet settings were not, so the
+  table flatters the flip hand somewhat.
+- Most influential parameters at every scale: string damping `c_l` and command latency `cmd_delay`. Both
+  ranges are one-sided around the nominal value (`c_l` nominal 0, range 0–0.5 1/s), so every draw is "worse
+  than nominal" for a controller that assumes no damping. The others are within noise at this sample size.
+- Loads at the full ranges, all runs (median / p95 / max): string tension 3.7 / 6.4 / 20 N; joint-1 torque
+  at the joint 1.5–1.6 / 1.6–1.7 / 1.7 N m; joint-1 motor speed 660–730 / 700–790 / 830 rpm; wrist motor
+  speed about 500 rpm during the flip; hook speed lost at a bottom 0.65–0.7 / 1.1–1.15 / 1.4 m/s; hook pulled
+  below coasting 10 / 20–22 / 28 mm.
+- Joint 1 sits at the current limit: the motor torque peak is ≥ 1.5× continuous in 99.9 % of the runs
+  (≥ 1.95× in 41 % magnet, 99.5 % flip), for 0.30–0.35 s per run at p95. The 1.5× torque margin the roadmap
+  asks for is not there with N1 = 6; the hook drag passes the 2 cm gate in 5 % (magnet) and 10 % (flip) of
+  the runs. Runs that fail early never reach the catch, so catch and flip loads are under-represented at
+  scale 1 (flip hand at scale 0.1: tension p95 12 N, wrist at its 2× limit in every run).
 
 ## Baseline and margins (stage 1 step 9)
 `control/baseline.py` reads the true yo-yo state, which is the "cheating" stage-1 baseline. In the hook frame,

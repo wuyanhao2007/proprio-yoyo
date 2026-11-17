@@ -63,8 +63,9 @@ def build(args, p: Params):
         duration = args.duration or 1.6
     elif args.scenario == "full_flow":
         reset_full_flow(sim)
-        ctrl, base = make_full_flow(p, BaselineConfig.load(p.catch_mode, n_bounces=args.n_bounces))
-        duration = args.duration or 11.0
+        over = {} if args.n_bounces is None else {"n_bounces": args.n_bounces}
+        ctrl, base = make_full_flow(p, BaselineConfig.load(p.catch_mode, **over))
+        duration = args.duration or (13.0 if p.catch_mode == "flip" else 11.0)
     elif args.scenario in ("flip_stow", "flip_catch"):
         sigma = args.sigma
         d = {"auto": "auto", "wrong": -sigma}.get(args.direction, args.direction)
@@ -102,8 +103,9 @@ def main():
     ap.add_argument("--ell0", type=float, default=0.40, help="funnel_catch: start string length")
     ap.add_argument("--v0", type=float, default=0.85, help="funnel_catch: start climb speed")
     ap.add_argument("--theta0", type=float, default=6.0, help="funnel_catch: start swing angle [deg]")
-    ap.add_argument("--n-bounces", type=int, default=3,
-                    help="full_flow: bottoms before/including the catch (0 = never catch)")
+    ap.add_argument("--n-bounces", type=int, default=None,
+                    help="full_flow: bottoms before/including the catch (0 = never catch; "
+                         "default: 3 for the magnet hand, 4 for the flip hand)")
     ap.add_argument("--no-anim", action="store_true")
     ap.add_argument("--fps", type=int, default=25)
     ap.add_argument("--speed", type=float, default=None, help="playback speed (default 1, catch 0.25)")

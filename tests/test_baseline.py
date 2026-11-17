@@ -51,10 +51,10 @@ def test_zlajpah_sustains_20_bounces():
 
 # ------------------------------------------------------------- flip hand (§4.4)
 MAIN = ("unseat", "release", "bottom", "in_cup", "flip_start", "drop", "seat_rebound", "stowed", "fail")
-FLIP_FLOW = ["unseat", "release", "bottom", "bottom", "bottom", "in_cup", "flip_start", "stowed"]
+FLIP_FLOW = ["unseat", "release"] + ["bottom"] * 4 + ["in_cup", "flip_start", "stowed"]
 
 
-def _run_flip(seed=0, duration=10.0, **params):
+def _run_flip(seed=0, duration=13.0, **params):
     p = Params.load(hand="flip", i_peak_ratio=2.0, **params)
     sim = Simulator(p, rng=np.random.default_rng(seed))
     ctrl, base = make_full_flow(p)
@@ -74,13 +74,17 @@ def _check_flip_flow(p, sim, base):
     assert r["i2_peak"] <= p.i_max2 + 1e-9
     sigma = [e for e in sim.events if e["type"] == "bottom"][-1]["sigma"]
     assert r["flip_direction"] == sigma                            # A9: turn with sign sigma
-    for rec in base.pulses[:2]:                                    # normal bounces stay out of the cup
-        assert rec.apex > p.ell_mouth
+    assert r["flip_direction"] == -base.cfg.throw_direction        # even bottoms: back the way it came
+    phi2 = sim.log.arrays()["phi2"]
+    assert abs(phi2[-1] - phi2[0]) < p.stow_tilt_max               # no net wrist turn per cycle
+    assert (np.cos(phi2) > -0.5).all()                             # the mouth never turns to the link-1 (-x) side
+    for rec in base.pulses[:base.cfg.n_bounces - 1]:               # normal bounces stay out of the seat
+        assert rec.apex > p.ell_min + p.s_max
 
 
 @pytest.mark.parametrize("seed", [0, 1, 2])
-def test_flip_full_flow_throw_three_bounces_catch_stow(seed):
-    """Flip hand: turn-down throw -> 3 bottoms -> seat (IN_CUP) -> flip -> STOWED."""
+def test_flip_full_flow_throw_four_bounces_catch_stow(seed):
+    """Flip hand: turn-down throw -> 4 bottoms -> seat (IN_CUP) -> flip back -> STOWED."""
     _check_flip_flow(*_run_flip(seed))
 
 
@@ -99,8 +103,10 @@ def test_flip_baseline_config_comes_from_the_hand_overlay():
     """hand_flip.yaml ``baseline`` block overrides the defaults; magnet has no block."""
     assert BaselineConfig.load("magnet") == BaselineConfig() == BaselineConfig.load()
     c = BaselineConfig.load("flip")
-    assert c.apex_target > Params.load(hand="flip").ell_mouth
+    p = Params.load(hand="flip")
+    assert c.apex_target > p.ell_min + p.s_max                     # apex in the flare at most, not the seat
     assert c.a_down < Params.load().g                              # slack limit
+    assert c.n_bounces % 2 == 0                                    # stow flip returns on the throw side
     assert BaselineConfig.load("flip", n_bounces=5).n_bounces == 5
     with pytest.raises(ValueError):
         BaselineConfig.load("flip", no_such_setting=1)

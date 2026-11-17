@@ -36,7 +36,11 @@ What differs is selected by ``Params.catch_mode``; the numbers come from the
 ``baseline`` block of config/hand_<hand>.yaml (``BaselineConfig.load``):
   * throw: magnet = pull the yo-yo off the magnet (``Throw``); flip = turn the
     mouth from up to down (``ThrowFlip``);
-  * apex_target must clear the deeper flip cup (ell_mouth = 0.116 m);
+  * apex_target: the flip cup is deeper (ell_mouth = 0.116 m); its bounces peak
+    in the flare (0.12 m), never in the straight seat (ell_min + s_max);
+  * n_bounces: 3 for the magnet hand, 4 for the flip hand. The stow flip must turn
+    with sign sigma (A9) and sigma alternates at every bottom, so an even count
+    turns the hand back the way the throw came (no net wrist turn, away from link 1);
   * catch: no magnet pulls the flip yo-yo in, it has to arrive on its own, and
     it only enters IN_CUP; control/stow_flip.py then turns the hand mouth-up
     (``control/full_flow.py`` chains the two controllers).
